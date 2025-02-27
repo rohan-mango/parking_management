@@ -32,8 +32,8 @@ import lombok.extern.slf4j.Slf4j;
 @Repository
 @Slf4j
 public class InMemoryParkingRepository implements ParkingRepository {
-    private final Map<String, Building> buildings = new HashMap<>();
-    private final Map<String, BaseEntity> entities = new HashMap<>();
+    private final Map<String, Building> buildings = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, BaseEntity> entities = Collections.synchronizedMap(new HashMap<>());
 
     /**
      * Initializes parking infrastructure with sample data
@@ -204,7 +204,7 @@ public class InMemoryParkingRepository implements ParkingRepository {
     }
 
     @Override
-    public List<ParkingSlot> findAvailableSlots(VehicleType vehicleType) {
+    public synchronized List<ParkingSlot> findAvailableSlots(VehicleType vehicleType) {
         return getAllSlots().stream()
             .filter(slot -> slot.getVehicleType() == vehicleType && !slot.isOccupied())
             .collect(Collectors.toList());
@@ -238,18 +238,26 @@ public class InMemoryParkingRepository implements ParkingRepository {
     }
 
     @Override
-    public void updateSlot(ParkingSlot slot) {
+    public synchronized void updateSlot(ParkingSlot slot) {
         Building building = buildings.get(slot.getBuildingId());
-        if (building != null) {
-            building.getFloors().stream()
-                .filter(floor -> floor.getFloorId().equals(slot.getFloorId()))
-                .findFirst()
-                .ifPresent(floor -> {
-                    int index = floor.getParkingSlots().indexOf(slot);
-                    if (index != -1) {
-                        floor.getParkingSlots().set(index, slot);
-                    }
-                });
+        if (building == null) {
+            throw new IllegalArgumentException("Building not found: " + slot.getBuildingId());
         }
+
+        Optional<Floor> floor = building.getFloors().stream()
+            .filter(f -> f.getFloorId().equals(slot.getFloorId()))
+            .findFirst();
+            
+        if (floor.isEmpty()) {
+            throw new IllegalArgumentException("Floor not found: " + slot.getFloorId());
+        }
+
+        int index = floor.get().getParkingSlots().indexOf(slot);
+        if (index == -1) {
+            throw new IllegalArgumentException("Slot not found: " + slot.getId());
+        }
+
+        floor.get().getParkingSlots().set(index, slot);
+        entities.put(slot.getId(), slot);
     }
 } 
